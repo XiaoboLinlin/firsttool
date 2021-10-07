@@ -33,7 +33,7 @@ class builder():
     #     # self.n_sheets = n_sheets
     #     print('working')
 
-    def make_graphene(self, ff_file_path, trj_file_path, pore_length, pore_depth, n_sheets):
+    def make_graphene(self, ff_file_path, pore_length, pore_depth, n_sheets):
         self.pore_length = pore_length
         self.pore_depth = pore_depth
         self.n_sheets = n_sheets
@@ -64,7 +64,7 @@ class builder():
         gra_ff = Forcefield(forcefield_files=ff_file_path)
         graphene = gra_ff.apply(graphene, residues = 'gra')
         for res in graphene.residues:
-            res.name = 'cdc'
+            res.name = 'gra'
         # graphene.box = boundary
         self._graphene = graphene
         return self._graphene
@@ -101,6 +101,57 @@ class builder():
             i += 1
         self._cdc = cdc
         return self._cdc
+
+    def carbon_slit_pore(self, ff_file_path, pore_size, pore_length, pore_depth, n_sheets):
+        """
+        Parameters
+        --------
+        ff_file_path: string
+            path to force field
+        pore_size: float, int, nm
+            the size of pore between graphene block
+        pore_length: float, nm
+            the length of the pore
+        pore_depth: float, nm
+            the depth of the pore
+        n_sheets: int
+            the number of sheets in each grahene block
+        """
+        pore_length = pore_length/2
+        self.make_graphene(ff_file_path, pore_length, pore_depth, n_sheets)
+        graphene = self.rotate(axis = 2, target='graphene')
+        graphene_copy = graphene.__copy__()
+        graphene_vertial_negative = self.rotate(axis = 0 , target = 'graphene')
+        
+        ### set up line equation for plane
+        z_values = list(set(graphene_copy.coordinates[:,2]))
+        y_values = list(set(graphene_vertial_negative.coordinates[:,1]))
+        coefficients = np.polyfit(y_values, z_values, 1)
+        plane = [2, '>', 1, 1, -0.5]
+        graphene_copy = self.remove_partial(graphene_copy, plane)
+        plane = [2, '<', 1, 1, 0.0]
+        graphene_vertial_negative = self.remove_partial(graphene_vertial_negative, plane)
+        graphene_right = graphene_vertial_negative + graphene_copy
+
+        ### make symmetric graphene_right to get left graphene
+        distance = np.max(graphene_right.coordinates[:, 1])
+        graphene_left = self.symmetric(graphene_right, 1, distance, edge = 0.3)
+        graphene_slit = graphene_left + graphene_right
+        factor = np.cos(np.pi/6) * 2.456
+        # factor = 2.456
+        number = 7
+        graphene_slit = self.remove_part(graphene_slit, 2, ">", factor * number)
+        graphene_slit_below = self.symmetric(graphene_slit, 2, 0, -1000)
+        graphene_slit_below = self.translate(graphene_slit_below, 2, factor * number)
+        pore_size = pore_size * 10 # angstrom
+        graphene_slit = self.translate(graphene_slit, 2, factor * number + pore_size)
+
+        graphene_slit_pore = graphene_slit + graphene_slit_below
+        graphene_slit_pore.box[1] = np.max(graphene_slit_pore.coordinates[:,1]) * 2
+        graphene_slit_pore.box[2] = 2 * factor * number + pore_size 
+        max_limit = np.max(graphene_slit_pore.coordinates[:, 2])
+        graphene_slit_pore = self.remove_part(graphene_slit_pore, 2, ">", max_limit-0.1)
+        return graphene_slit_pore
 
 
 
@@ -167,42 +218,59 @@ class builder():
                         self._cdc.atoms.remove(atom)
         return self._cdc
 
-    def remove_part(self, structure, axis, limit):
+    def remove_part(self, structure, axis, dir, limit):
         """ remove the part of cdc which is below limit in axis direction
 
         Parameters
         --------
         structure: parmed.structure
         axis: int
-            0: x axis
-            1: y axis
-            2: z axis
-        limit: float
+            0: yz plane
+            1: xz plane
+            2: xy plane
+        dir: "<" or ">"
+            "<": remove below limit
+            ">": remove above limit
+        limit: float, angstrom
             below this limit, atoms in this structure will be removed
         """
 
         count = np.where(structure.coordinates[:, axis] < limit)
         n = len(count[0])
-        if axis == 1:
+        if axis == 1 and dir == "<":
             for i in range(n):
                 for atom in structure.atoms:
                     if atom.xy < limit:
                         structure.atoms.remove(atom)
-        if axis == 0:
+        if axis == 1 and dir == ">":
+            for i in range(n):
+                for atom in structure.atoms:
+                    if atom.xy > limit:
+                        structure.atoms.remove(atom)
+        if axis == 0 and dir == "<":
             for i in range(n):
                 for atom in structure.atoms:
                     if atom.xx < limit:
                         structure.atoms.remove(atom)
-        if axis == 2:
+        if axis == 0 and dir == ">":
+            for i in range(n):
+                for atom in structure.atoms:
+                    if atom.xx > limit:
+                        structure.atoms.remove(atom)
+        if axis == 2 and dir == "<":
             for i in range(n):
                 for atom in structure.atoms:
                     if atom.xz < limit:
                         structure.atoms.remove(atom)
+        if axis == 2 and dir == ">":
+            for i in range(n):
+                for atom in structure.atoms:
+                    if atom.xz > limit:
+                        structure.atoms.remove(atom)
         return structure
 
     def remove_partial(self, structure, plane):
-        """ remove the part of cdc which is below limit in axis direction
-            with considering plane range
+        """ remove the part of structure which is below or above the plane
             currently, only support z = f(y)
 
         Parameters
@@ -239,7 +307,32 @@ class builder():
                             structure.atoms.remove(atom)
         return structure
 
-    
+    def symmetric(self, structure, plane, distance, edge):
+        """
+        Parameters
+        --------
+        structure: parmed.structure
+        plane: int
+            0: yz plane
+            1: xz plane
+            2: xy plane
+        distance: float
+            sign like +,- means direction; the distance to plane
+        edge: float
+            within the edge, the atoms for sysmetry are not considered
+        """
+        structure_copy = structure.__copy__()
+        if plane == 2:
+            for atom in structure_copy.atoms:
+                distance_to_middle_line = distance - atom.xz
+                if distance_to_middle_line > edge:
+                    atom.xz += 2 * distance_to_middle_line
+        if plane == 1:
+            for atom in structure_copy.atoms:
+                distance_to_middle_line = distance - atom.xy
+                if distance_to_middle_line > edge:
+                    atom.xy += 2 * distance_to_middle_line
+        return structure_copy
 
     def move_structure(self, axis, distance, target):
         """
