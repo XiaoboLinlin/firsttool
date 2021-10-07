@@ -1,0 +1,7 @@
+setup.py
+firsttool/__init__.py
+firsttool.egg-info/PKG-INFO
+firsttool.egg-info/SOURCES.txt
+firsttool.egg-info/dependency_links.txt
+firsttool.egg-info/not-zip-safe
+firsttool.egg-info/top_level.txt
