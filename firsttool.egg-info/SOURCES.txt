@@ -1,3 +1,4 @@
+README.md
 setup.py
 firsttool/__init__.py
 firsttool.egg-info/PKG-INFO

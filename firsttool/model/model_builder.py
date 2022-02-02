@@ -102,7 +102,37 @@ class builder():
         self._cdc = cdc
         return self._cdc
 
-    def carbon_slit_pore(self, ff_file_path, pore_size, pore_length, pore_depth, n_sheets):
+    def mg_cdc_replicate(self, cdc, ff_file_path):
+        """
+        Parameters
+        --------
+        cdc:
+            parmed structure, can be others
+        ff_file_path:
+            path to force field file
+        trj_file_path:
+        """
+        mg = mb.Compound(name='mg')
+        n_atoms = len(cdc.coordinates)
+        positions = cdc.coordinates/10
+        box_lengths = 7
+        box = mb.Box(lengths = box_lengths)
+        box_system = mb.fill_box(mg, n_atoms, box = box)
+        mg_ff = Forcefield(forcefield_files=ff_file_path)
+        mg_cdc = mg_ff.apply(box_system, residues = 'mg')
+        for res in mg_cdc.residues:
+            res.name = 'mg'
+        positions = cdc.coordinates
+        i = 0 
+        for atom in mg_cdc.atoms:
+            atom.xx = positions[i][0]
+            atom.xy = positions[i][1]
+            atom.xz = positions[i][2]
+            i += 1
+        return mg_cdc
+
+
+    def carbon_slit_pore(self, ff_file_path, pore_size, pore_length, pore_depth, n_sheets, high_number=7):
         """
         Parameters
         --------
@@ -127,21 +157,24 @@ class builder():
         z_values = list(set(graphene_copy.coordinates[:,2]))
         y_values = list(set(graphene_vertial_negative.coordinates[:,1]))
         coefficients = np.polyfit(y_values, z_values, 1)
-        plane = [2, '>', 1, 1, -0.5]
+        print(coefficients)
+        plane = [2, '>', 1, 1, 0]
         graphene_copy = self.remove_partial(graphene_copy, plane)
-        plane = [2, '<', 1, 1, 0.0]
+        plane = [2, '<', 1, 1, 0.5]
         graphene_vertial_negative = self.remove_partial(graphene_vertial_negative, plane)
         graphene_right = graphene_vertial_negative + graphene_copy
 
         ### make symmetric graphene_right to get left graphene
         distance = np.max(graphene_right.coordinates[:, 1])
-        graphene_left = self.symmetric(graphene_right, 1, distance, edge = 0.3)
+        graphene_left = self.symmetric(graphene_right, 1, distance)
+        graphene_left = self.remove_part(graphene_left, 1, "<", distance+0.3)
         graphene_slit = graphene_left + graphene_right
         factor = np.cos(np.pi/6) * 2.456
         # factor = 2.456
-        number = 7
+        ### the number is control how height you want 
+        number = high_number
         graphene_slit = self.remove_part(graphene_slit, 2, ">", factor * number)
-        graphene_slit_below = self.symmetric(graphene_slit, 2, 0, -1000)
+        graphene_slit_below = self.symmetric(graphene_slit, 2, 0)
         graphene_slit_below = self.translate(graphene_slit_below, 2, factor * number)
         pore_size = pore_size * 10 # angstrom
         graphene_slit = self.translate(graphene_slit, 2, factor * number + pore_size)
@@ -185,6 +218,25 @@ class builder():
                 # box = self._graphene.box
             return self._graphene
 
+    def general_rotate(self, axis, structure):
+        """  Rotate is for graphene for now
+        Parameters
+        --------
+        structure: parmed.structure
+        axis: int
+            0: x axis (y, z change)
+            1: y axis
+            2: z axis
+        """
+        if axis == 0:
+            for atom in structure.atoms:
+                xy = atom.xy
+                xz = atom.xz
+                atom.xy = xz
+                atom.xz = xy
+            box = structure.box
+            structure.box = [box[0], box[2], box[1], 90, 90, 90]
+        return structure
 
     def remove_partial_cdc(self, axis, limit):
         """ remove the part of cdc which is below limit in axis direction
@@ -307,7 +359,7 @@ class builder():
                             structure.atoms.remove(atom)
         return structure
 
-    def symmetric(self, structure, plane, distance, edge):
+    def symmetric(self, structure, plane, distance):
         """
         Parameters
         --------
@@ -325,13 +377,11 @@ class builder():
         if plane == 2:
             for atom in structure_copy.atoms:
                 distance_to_middle_line = distance - atom.xz
-                if distance_to_middle_line > edge:
-                    atom.xz += 2 * distance_to_middle_line
+                atom.xz += 2 * distance_to_middle_line
         if plane == 1:
             for atom in structure_copy.atoms:
                 distance_to_middle_line = distance - atom.xy
-                if distance_to_middle_line > edge:
-                    atom.xy += 2 * distance_to_middle_line
+                atom.xy += 2 * distance_to_middle_line
         return structure_copy
 
     def move_structure(self, axis, distance, target):
@@ -439,3 +489,35 @@ class builder():
         solution_list = list(solution.values())
         n_list = [int(num) for num in solution_list]
         return n_list
+    
+    def assign_xyz(self, box_system, pmd1, pmd1_name, pmd2, pmd2_name, pmd3=pmd.Structure(), pmd3_name="nothing"):
+        """assign the locations of box child atoms to new created total parmed structure corresponding to box_system
+
+        Parammeters
+        --------
+        box_system : mb.Compound
+        pmd1 : parmed structure 1
+        pmd1_name: string
+            the name of parmed structure 1
+            
+        return parmed structure
+        """
+        
+        structure = pmd.Structure()
+        for child in box_system.children:
+            copy_structure = 0
+            if child.name == pmd1_name:
+                copy_structure = pmd1.__copy__()
+                for i, atom in enumerate(copy_structure.atoms):
+                    [atom.xx, atom.xy, atom.xz] = child.xyz[i] * 10
+            if child.name == pmd2_name:
+                copy_structure = pmd2.__copy__()
+                for i, atom in enumerate(copy_structure.atoms):
+                    [atom.xx, atom.xy, atom.xz] = child.xyz[i] * 10
+            if child.name == pmd3_name:
+                copy_structure = pmd3.__copy__()
+                for i, atom in enumerate(copy_structure.atoms):
+                    [atom.xx, atom.xy, atom.xz] = child.xyz[i] * 10
+            copy_structure.residues[0].name = child.name
+            structure =  structure + copy_structure 
+        return structure
