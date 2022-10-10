@@ -14,7 +14,7 @@ class analysis():
                 if ln.startswith("Step"):
                     copy = True
                     continue
-                if ln.startswith("Loop"):
+                if ln.startswith("Loop") or ln.startswith("Lost"):
                     copy = False
                 if ln.startswith("if \"$r == 0\" then \"log log.2\""):
                     copy = False
