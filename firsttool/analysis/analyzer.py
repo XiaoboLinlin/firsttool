@@ -16,9 +16,9 @@ class analysis():
                     continue
                 if ln.startswith("Loop") or ln.startswith("Lost"):
                     copy = False
-                if ln.startswith("if \"$r == 0\" then \"log log.2\""):
+                if ln.startswith("if \"${if_restart} == 0\" then \"log log.2\""):
                     copy = False
-                if ln.endswith("if \"$r == 0\" then \"log log.2\""):
+                if ln.endswith("if \"${if_restart} == 0\" then \"log log.2\""):
                     copy = False
                 # if ln.startswith(""):
                 #     copy = False
